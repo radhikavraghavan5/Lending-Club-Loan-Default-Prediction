@@ -6,7 +6,7 @@ Research Question:- Finding the driver variables for Loans not getting repaid by
 ## Model Accuracies
 | Model         | Accuracy      |
 | ------------- | ------------- |
-| Bagging with Base estimator as Random Forest	  | 0.8699  |
+| Bagging with Base estimator as Random Forest	  | 0.8415  |
 | Boosted C5.0 Decision Tree  | 0.8665  |
 | Null model  | 0.8290  |
 | Logistic regression using GLMNET  | 0.8699  |
