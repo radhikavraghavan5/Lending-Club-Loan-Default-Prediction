@@ -1,0 +1,135 @@
+---
+title: "Lending Club Data"
+author: "Radhika Vijayaraghavan"
+date: "2/16/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Lending Club Data 
+
+```{r}
+library(pacman)
+p_load(tidyverse, arrow, fs, tictoc, lubridate, beepr)
+```
+
+##
+
+```{r}
+tic()
+lending_club_data <- read_csv_arrow("data_accepted/accepted_2007_to_2018Q4.csv")
+toc()
+```
+
+```{r}
+head(lending_club_data)
+
+str(lending_club_data)
+```
+
+```{r}
+# The issue_d variable will be used to determine year the loan was issued
+lending_club_data <- lending_club_data %>% mutate(year = year(mdy(issue_d)))
+
+# check the unique years in the data
+lending_club_data %>% select(year) %>% 
+  distinct(year) %>% 
+  arrange(year)
+  
+# subset the years 2012-2014 for the training data
+lending_club_data_2012_2014 <- lending_club_data %>% 
+  filter(year %in% c(2012, 2013, 2014))
+
+# check the unique years in the data
+lending_club_data_2012_2014 %>% select(year) %>% 
+  distinct(year) %>% 
+  arrange(year)
+
+# subset the year 2015 for the testing data
+lending_club_data_2015 <- lending_club_data %>% 
+  filter(year == 2015)
+
+# check the unique year in the data
+lending_club_data_2015 %>% select(year) %>% 
+  distinct() %>% 
+  arrange(year)
+```
+
+```{r}
+lending_club_data_2012_2014 %>% group_by(year) %>% 
+  count(year)
+
+lending_club_data_2015 %>% count(year)
+```
+
+## 
+
+```{r}
+if (!is_dir("data")) dir_create("data")
+
+is_dir("data")
+```
+
+```{r}
+tic()
+arrow::write_parquet(lending_club_data_2012_2014, "data/lending_club_data_2012_2014.parquet")
+toc()
+
+tic()
+arrow::write_parquet(lending_club_data_2015, "data/lending_club_data_2015.parquet")
+toc()
+```
+
+```{r}
+tic()
+arrow::write_feather(lending_club_data_2012_2014, "data/lending_club_data_2012_2014.feather")
+toc()
+
+tic()
+arrow::write_feather(lending_club_data_2015, "data/lending_club_data_2015.feather")
+toc()
+```
+
+
+```{r}
+file_show("data")
+```
+
+## Reading
+
+```{r}
+tic()
+lending_club_data_2012_2014_new <- arrow::read_parquet("data/lending_club_data_2012_2014.parquet")
+toc()
+
+tic()
+lending_club_data_2015_new <- arrow::read_parquet("data/lending_club_data_2015.parquet")
+toc()
+```
+
+```{r}
+tic()
+lending_club_data_2012_2014_new <- arrow::read_feather("data/lending_club_data_2012_2014.feather")
+toc()
+
+tic()
+lending_club_data_2015_new <- arrow::read_feather("data/lending_club_data_2015.feather")
+toc()
+```
+
+```{r}
+tic()
+lending_club_data_2012_2014_new <- readRDS("data/lending_club_data_2012_2014.Rds")
+toc()
+
+tic()
+lending_club_data_2015_new <- readRDS("data/lending_club_data_2015.Rds")
+toc()
+```
+
+```{r}
+beep();beep();beep();beep(sound=7)
+```

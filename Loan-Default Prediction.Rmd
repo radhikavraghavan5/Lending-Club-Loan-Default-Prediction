@@ -1,0 +1,648 @@
+---
+title: |
+  | \LARGE \bf{Lending Club LoanDefault-Prediction}
+  |
+  | by
+  |
+  | Radhika Vijayaraghavan
+  | netID# zg4894
+  |
+  | Instructor: Dr.Eric Suess
+  |
+  | STAT 652, California State University East Bay
+  |
+  | Spring 2023
+output:
+  pdf_document: null
+  html_document:
+    df_print: paged
+header-includes:
+- \usepackage{titling}
+- \usepackage{times}
+- \usepackage{sectsty}
+- \sectionfont{\large} 
+- \usepackage{titlesec}
+- \pretitle{\begin{center}\LARGE\includegraphics[width=14cm]{csueb logo.jpeg}\\[\bigskipamount]}
+- \posttitle{\end{center}}
+- \usepackage{ragged2e}
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+---
+
+```{r, echo =FALSE, include=FALSE}
+library(pacman)
+p_load(yardstick, janitor, tidymodels, discrim, gmodels, pROC, readr, visdat, ranger, Boruta, caret, tictoc, parsnip, rsample, vip, naniar, DataExplorer)
+```
+
+
+\break
+\justifying
+\tableofcontents
+\break
+\newpage
+\fontsize{12}{22}
+\allsectionsfont{\centering}
+\subsectionfont{\raggedright}
+\subsubsectionfont{\raggedright}
+
+# Abstract
+
+The objective of this project is to apply the various Machine Learning modeling techniques taught in STAT 652 course. Effort has been made to incorporate the 5-step process (collect-explore-train-evaluate-improve) for each model. Model improvements have been done using Cross Validation, Tuning. The algorithms used for this predicting `loan default` are Null model, Elastic Net Regression,
+
+As part of data cleaning, the below were performed:- 1) The columns that had *greater than 10% of missing values* were removed. 2) Converted variables to its correct data type such as characters to factors 3) Removed redundant variables. 4) Removed variables that *leak data* from the future, Eg:- `funded_amnt`, `recoveries`, `total_pymnt`, `collection_recovery_fee` etc) 5) *Boruta algorithm* was used for feature selection, and recipe for creating dummy variables for categorical variables 6) Feature Importance Plot and combines ROC curves have been plotted for the best model(C5.0)
+
+\newpage
+
+# Data Description
+
+#### a. Data Source
+
+The source of this data set is Kaggle(Lending Club data from 2012-2014).
+
+#### b. Data Description
+
+The cleaned data set consist of 366603 observations on the following 25 variables. 2 new variables have been added. Below are the description of all the variables.\
+
+-   **loan_amnt** = The listed amount of the loan applied for by the borrower.
+-   **term** = The number of payments on the loan. Values are in months and can be either 36 or 60.
+-   **installment** = The monthly payment owed by the borrower if the loan originates.
+-   **home_ownership** = The home ownership status provided by the borrower during registration or obtained from the credit report. Our values are: RENT, OWN, MORTGAGE, OTHER
+-   **purpose** = A category provided by the borrower for the loan request.
+-   **dti** = A ratio calculated using the borrower's total monthly debt payments on the total debt obligations
+-   **open_acc** = The number of open credit lines in the borrower's credit file.
+-   **revol_bal** = Total credit revolving balance
+
+Additionally below variables were added:-
+
+-   **loan_default** - Binary values 0(Fully Paid) or 1(Default/Charged Off), extracted from initial `loan_status` variable
+-   **fico_average** - Average of `last_fico_range_high` and `last_fico_range_low`
+
+#### Executive Summary of model accuracy
+
+|                             | Null model | Logistic regression using GLMNET | Random Forest | Boosted C5.0 | Naive Bayes |
+|------------|------------|---------------|------------|------------|------------|
+| **Before Cross Validation** |            |                                  | 0.8642        |              |             |
+| **After Cross Validation**  |            |                                  |               |              |             |
+
+## Step 1 - Collect data
+
+```{r}
+loan <- read_csv("lending_club_data_2012_2014.csv") %>% 
+  clean_names()
+```
+
+```{r, include=FALSE}
+# checking for duplicate rows
+sum(duplicated(loan))
+```
+
+```{r, include=FALSE}
+#apply(X = is.na(loan), MARGIN = 2, FUN = sum)
+```
+
+```{r, include=FALSE}
+colSums(is.na(loan))
+```
+
+## Step 2 - exploring and preparing the data
+
+```{r, include = FALSE, echo = FALSE}
+#Identifying and cleaning columns containing high % of NULL values
+loan_cleaned <- loan[, -which(colMeans(is.na(loan)) > 0.1)] %>% 
+  select(loan_status, everything()) %>%
+  select(-c(id, url, policy_code, acc_now_delinq, collections_12_mths_ex_med, 
+            percent_bc_gt_75, num_tl_30dpd, num_tl_90g_dpd_24m, num_tl_120dpd_2m,
+            pub_rec_bankruptcies, tax_liens, delinq_amnt, chargeoff_within_12_mths,
+            pymnt_plan, url, year, hardship_flag, disbursement_method, 
+            debt_settlement_flag, num_actv_bc_tl, num_bc_sats, 
+            num_bc_tl, num_il_tl, num_op_rev_tl, title, year, mo_sin_rcnt_rev_tl_op, 
+            mo_sin_rcnt_tl, sub_grade, emp_title, zip_code, issue_d,
+            out_prncp, out_prncp_inv, application_type, num_tl_op_past_12m,
+            last_pymnt_d, last_credit_pull_d, emp_length)) %>%
+  drop_na()
+```
+
+```{r eval = FALSE}
+create_report(loan_imp, y = "loan_default", output_file = "eda_report.html", output_dir = getwd())
+```
+
+```{r, eval=FALSE}
+# cols_int = c(1,12,13)
+# df[cols_int] = sapply(df[cols_int],as.integer)
+# cols_num = c(6,10)
+# df[cols_num] = sapply(df[cols_num],as.numeric)
+```
+
+```{r, include = FALSE}
+loan_cleaned <- loan_cleaned %>%
+  select(loan_status, everything()) %>% 
+  mutate(loan_status = as.factor(loan_status),
+         grade = as.factor(grade),
+         home_ownership = as.factor(home_ownership),
+         verification_status = as.factor(purpose),
+         purpose = as.factor(purpose),
+         addr_state = as.factor(addr_state),
+         initial_list_status = as.factor(initial_list_status),
+         mort_acc = as.factor(mort_acc),
+         term = as.factor(term),
+         num_accts_ever_120_pd = as.factor(num_accts_ever_120_pd),
+         fico_average = (fico_range_high + fico_range_low) / 2
+         )
+
+loan_cleaned
+
+
+```
+
+```{r, include = FALSE}
+loan_cleaned <- filter(loan_cleaned, loan_cleaned$loan_status == "Fully Paid" | loan_cleaned$loan_status == "Charged Off" | loan_cleaned$loan_status == "Default")
+
+loan_cleaned$loan_status_new <- ifelse(loan_cleaned$loan_status == "Fully Paid", "Fully Paid", "Charged Off")
+
+loan_cleaned <- mutate(loan_cleaned, 
+                           loan_default = as.numeric(ifelse(
+                             loan_cleaned$loan_status == "Fully Paid", 0, 1))) %>% 
+  drop_na()
+```
+
+```{r}
+loan_cleaned_new <- loan_cleaned %>% 
+  select(-c(loan_status, loan_status_new, earliest_cr_line)) %>% 
+  mutate(loan_default = as.factor(loan_default))
+
+head(loan_cleaned_new)
+```
+
+```{r, eval=FALSE}
+#Feature engineering with Boruta algorithm
+
+registerDoMC(cores = 5)
+registerDoParallel(cores = 5)
+m_rf_Boruta <- Boruta(loan_default ~ ., data = loan_cleaned_new, doTrace = 2, ntree = 10, seed=1, num.threads = 5)
+```
+
+```{r, eval=FALSE}
+#Finding the top variables of importance
+boruta_names <- names(m_rf_Boruta$finalDecision[m_rf_Boruta$finalDecision %in% c("Confirmed")])
+
+print(boruta_names)
+
+plot(m_rf_Boruta, cex.axis=.7, las=2, ylab = "Importance", main = "Variable Importance using Boruta")
+```
+
+```{r, include=FALSE}
+loan_imp <- loan_cleaned_new %>%
+  select(loan_default, loan_amnt, funded_amnt, funded_amnt_inv,
+         installment, revol_bal, num_actv_rev_tl, acc_open_past_24mths,
+         revol_util, total_acc, bc_util, annual_inc, pub_rec,
+         home_ownership, mort_acc, pub_rec, open_acc, last_pymnt_amnt,
+         grade, purpose, delinq_2yrs, inq_last_6mths, 
+         dti, pub_rec, fico_average, verification_status, term)
+
+head(loan_imp)
+```
+
+## Step 3 -- training a model on the data
+
+```{r, include=FALSE}
+set.seed(1234)
+loan_split <- initial_split(loan_imp, prop = 0.75)
+loan_split
+
+train_data <- training(loan_split)
+test_data <- testing(loan_split)
+```
+
+```{r, include=FALSE}
+loan_recipe <-
+  recipe(loan_default ~ ., data = train_data) %>%
+  #step_normalize(all_numeric()) %>% 
+  step_dummy(all_nominal_predictors(), -all_outcomes()) %>%
+  prep()
+
+```
+
+```{r, include=FALSE}
+train_prep <- juice(loan_recipe)
+
+test_prep <- bake(loan_recipe, test_data)
+
+```
+
+```{r, include=FALSE}
+#for 5 fold cross validation
+folds <- train_data %>%
+  vfold_cv(5)
+```
+
+## NULL MODEL
+
+```{r, include=FALSE}
+# tidymodels_prefer(quiet = FALSE)
+mod_null <- logistic_reg(mode = "classification") %>%
+  set_engine("glm") %>% 
+  parsnip::fit(loan_default ~ 1, train_prep)
+
+```
+
+```{r, include=FALSE}
+mod_null_pred <- test_prep %>% 
+  select(loan_default) %>%
+  bind_cols(
+    predict(mod_null, new_data = test_prep, type = "class")
+  )
+
+head(mod_null_pred)
+```
+
+```{r, include=FALSE}
+mod_null %>%
+  predict(test_prep) %>%
+  bind_cols(test_prep) %>%
+  metrics(loan_default, estimate = .pred_class)
+```
+
+```{r, include=FALSE}
+mod_null %>%
+  predict(test_prep) %>%
+  bind_cols(test_prep) %>%
+  conf_mat(truth = loan_default, estimate = .pred_class)
+```
+
+```{r, include=FALSE}
+#create roc object
+mod_null_pred$loan_default <- as.numeric(mod_null_pred$loan_default)
+mod_null_pred$.pred_class <- as.numeric(mod_null_pred$.pred_class)
+
+null_model_roc_obj <- roc(mod_null_pred$loan_default,
+               mod_null_pred$.pred_class)
+```
+
+## LOGISTIC REGRESSION
+
+```{r, include=FALSE}
+mod_glmnet <- 
+  logistic_reg(penalty = 0.001, mixture = 1) %>% 
+  set_engine("glmnet") %>% 
+  set_mode("classification")
+```
+
+```{r, include=FALSE}
+glm_fit <- mod_glmnet %>%
+  fit(loan_default ~ ., data = train_prep)
+```
+
+```{r, include=FALSE}
+glm_pred <- test_prep %>% 
+  select(loan_default) %>%
+  bind_cols(
+    predict(glm_fit, new_data = test_prep, type = "class")
+  )
+```
+
+```{r, include=FALSE}
+glm_wflow <-
+  workflow() %>%
+  add_model(mod_glmnet) %>% 
+  add_recipe(loan_recipe)
+```
+
+```{r, include=FALSE}
+glmnet_fit <- glm_wflow %>%
+  last_fit(loan_split)
+
+collect_metrics(glmnet_fit)
+```
+
+### 5 fold cross validation
+
+```{r, include=FALSE}
+control <- control_resamples(save_pred = TRUE)
+
+glm_fit_rs <- 
+  glm_wflow %>% 
+  fit_resamples(folds, control = control)
+
+collect_metrics(glm_fit_rs)
+```
+
+```{r, include=FALSE}
+# generate predictions from the test set
+glm_test_predictions <- glm_fit_rs %>% collect_predictions()
+glm_test_predictions
+```
+
+```{r, include=FALSE}
+glm_test_predictions$loan_default <- as.numeric(glm_test_predictions$loan_default)
+glm_test_predictions$.pred_class <- as.numeric(glm_test_predictions$.pred_class)
+
+#create roc object
+glm_model_roc_obj <- roc(glm_test_predictions$loan_default,
+               glm_test_predictions$.pred_class)
+
+```
+
+```{r, include=FALSE}
+glm_test_predictions$loan_default <- as.factor(glm_test_predictions$loan_default)
+glm_test_predictions$.pred_class <- as.factor(glm_test_predictions$.pred_class)
+
+lvs <- c("Fully Paid", "Default")
+truth <- glm_test_predictions$loan_default
+pred <- glm_test_predictions$.pred_class
+
+table <- data.frame(confusionMatrix(pred, truth)$table)
+
+plotTable <- table %>%
+  mutate(goodbad = ifelse(table$Prediction == table$Reference, "good", "bad")) %>%
+  group_by(Reference) %>%
+  mutate(prop = Freq/sum(Freq))
+
+# fill alpha relative to sensitivity/specificity by proportional outcomes within reference groups (see dplyr code above as well as original confusion matrix for comparison)
+ggplot(data = plotTable, mapping = aes(x = Reference, y = Prediction, 
+                                       fill = goodbad, alpha = prop)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = .5, fontface  = "bold", alpha = 1) +
+  scale_fill_manual(values = c(good = "green", bad = "red")) +
+  theme_bw() +
+  xlim(rev(levels(table$Reference))) +
+  labs(title="Confusion matrix for Elastic Net Regression",
+        x ="Truth", y = "Prediction")
+
+```
+
+## RANDOM FOREST
+
+```{r, include=FALSE}
+mod_rf <- rand_forest(mode = "classification",
+             mtry = tune(),
+             trees = tune()) %>%
+  set_engine("ranger")
+
+mod_rf
+```
+
+```{r, include=FALSE}
+# set the workflow
+rf_workflow <- workflow() %>%
+  add_recipe(loan_recipe) %>%
+  add_model(mod_rf)
+```
+
+```{r, include=FALSE}
+# specify which values eant to try
+rf_grid <- expand.grid(mtry = c(3, 4, 5), 
+            trees = c(10, 30, 50))
+
+# extract results
+rf_tune_results <- rf_workflow %>%
+  tune_grid(resamples = folds, #CV object
+            grid = rf_grid, # grid of values to try
+            metrics = metric_set(accuracy, roc_auc) # metrics we care about
+            )
+
+rf_tune_results
+```
+
+```{r, include=FALSE}
+# print results
+rf_tune_results %>%
+  collect_metrics()
+```
+
+```{r, include=FALSE}
+param_final <- rf_tune_results %>%
+  select_best(metric = "accuracy")
+param_final
+```
+
+```{r, include=FALSE}
+rf_workflow <- rf_workflow %>%
+  finalize_workflow(param_final)
+```
+
+```{r, include=FALSE}
+rf_fit <- rf_workflow %>%
+  last_fit(loan_split)
+
+rf_fit %>% collect_metrics()
+```
+
+### 5 fold cross validation
+
+```{r, include=FALSE}
+control <- control_resamples(save_pred = TRUE)
+
+rf_fit_rs <- 
+  rf_workflow %>% 
+  fit_resamples(folds, control = control)
+
+collect_metrics(rf_fit_rs)
+```
+
+```{r, include=FALSE}
+# generate predictions from the test set
+rf_test_predictions <- rf_fit_rs %>% collect_predictions() 
+```
+
+```{r, include=FALSE}
+#create roc object
+rf_test_predictions$loan_default <- as.numeric(rf_test_predictions$loan_default)
+rf_test_predictions$.pred_class <- as.numeric(rf_test_predictions$.pred_class)
+
+rf_model_roc_obj <- roc(rf_test_predictions$loan_default,
+               rf_test_predictions$.pred_class)
+```
+
+```{r, include=FALSE}
+rf_test_predictions$loan_default <- as.factor(rf_test_predictions$loan_default)
+rf_test_predictions$.pred_class <- as.factor(rf_test_predictions$.pred_class)
+
+lvs <- c("Fully Paid", "Default")
+truth <- rf_test_predictions$loan_default
+pred <- rf_test_predictions$.pred_class
+
+table <- data.frame(confusionMatrix(pred, truth)$table)
+
+plotTable <- table %>%
+  mutate(goodbad = ifelse(table$Prediction == table$Reference, "good", "bad")) %>%
+  group_by(Reference) %>%
+  mutate(prop = Freq/sum(Freq))
+
+# fill alpha relative to sensitivity/specificity by proportional outcomes within reference groups (see dplyr code above as well as original confusion matrix for comparison)
+ggplot(data = plotTable, mapping = aes(x = Reference, y = Prediction, 
+                                       fill = goodbad, alpha = prop)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = .5, fontface  = "bold", alpha = 1) +
+  scale_fill_manual(values = c(good = "green", bad = "red")) +
+  theme_bw() +
+  xlim(rev(levels(table$Reference))) +
+  labs(title="Confusion matrix for Random Forest",
+        x ="Truth", y = "Prediction")
+
+```
+
+## C5.0 decision tree
+
+```{r, include=FALSE}
+mod_tree <- decision_tree(mode = "classification") %>%
+  set_engine("C5.0", trials = 10)
+  
+mod_tree
+```
+
+```{r, include=FALSE}
+tree_fit <- mod_tree %>% 
+  fit(loan_default ~ ., data = train_prep)
+```
+
+```{r, include=FALSE}
+c50_pred <- test_prep %>% 
+  select(loan_default) %>%
+  bind_cols(
+    predict(tree_fit, new_data = test_prep, type = "class")
+  )
+c50_pred
+```
+
+```{r, include=FALSE}
+tree_wflow <-
+  workflow() %>%
+  add_recipe(loan_recipe) %>%
+  add_model(mod_tree)
+```
+
+```{r, include=FALSE}
+tree_fit <- tree_wflow %>%
+  last_fit(loan_split)
+
+tree_fit
+```
+
+```{r, eval=FALSE}
+tree_fit %>% 
+  collect_metrics()
+```
+
+### 5 fold cross validation
+
+```{r, echo=FALSE}
+control <- control_resamples(save_pred = TRUE)
+
+tree_fit_rs <- 
+  tree_wflow %>% 
+  fit_resamples(folds, control = control)
+
+collect_metrics(tree_fit_rs)
+```
+
+```{r, include=FALSE}
+# generate predictions from the test set
+tree_test_predictions <- tree_fit_rs %>% collect_predictions() 
+tree_test_predictions
+```
+
+```{r, echo=FALSE}
+tree_fit_obj <- tree_fit %>% 
+  extract_fit_parsnip()
+
+# create a variable importance plot with color
+vip(tree_fit_obj, num_features = 10, bar = TRUE, 
+    fill = viridisLite::viridis(n = 10, alpha = 0.5),
+    ggtheme = theme_minimal() +
+      theme(plot.background = element_rect(fill = "white"))) +
+  scale_fill_manual(values = viridisLite::viridis(n = 10, alpha = 0.5),
+                    guide = FALSE) +
+  labs(title = "Variable Importance for C5.0 Boosted Tree")
+```
+
+```{r, include=FALSE}
+#create roc object
+tree_test_predictions$loan_default <- as.numeric(tree_test_predictions$loan_default)
+tree_test_predictions$.pred_class <- as.numeric(tree_test_predictions$.pred_class)
+
+
+C50_model_roc_obj <- roc(tree_test_predictions$loan_default,
+               tree_test_predictions$.pred_class)
+
+```
+
+```{r, echo=FALSE}
+tree_test_predictions$loan_default <- as.factor(tree_test_predictions$loan_default)
+tree_test_predictions$.pred_class <- as.factor(tree_test_predictions$.pred_class)
+
+
+lvs <- c("Fully Paid", "Default")
+truth <- tree_test_predictions$loan_default
+pred <- tree_test_predictions$.pred_class
+
+table <- data.frame(confusionMatrix(pred, truth)$table)
+
+plotTable <- table %>%
+  mutate(goodbad = ifelse(table$Prediction == table$Reference, "good", "bad")) %>%
+  group_by(Reference) %>%
+  mutate(prop = Freq/sum(Freq))
+
+# fill alpha relative to sensitivity/specificity by proportional outcomes within reference groups (see dplyr code above as well as original confusion matrix for comparison)
+ggplot(data = plotTable, mapping = aes(x = Reference, y = Prediction, 
+                                       fill = goodbad, alpha = prop)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = .5, fontface  = "bold", alpha = 1) +
+  scale_fill_manual(values = c(good = "green", bad = "red")) +
+  theme_bw() +
+  xlim(rev(levels(table$Reference))) +
+  labs(title="Confusion matrix for Boosted C5.0",
+        x ="Truth", y = "Prediction")
+
+```
+
+## Combined ROC Curves
+
+```{r, echo=FALSE}
+# create an empty plot with labels and title
+plot(0, 1, type = "n", 
+     main = "Combined ROC Curve for all models", 
+     xlab = "False Positive Rate", 
+     ylab = "True Positive Rate", 
+     xlim = c(0.0, 1.0), ylim = c(0, 1))
+
+# create a vector to store the model names
+model_names <- c("Null Model", "C5.0", 
+                 "Random Forest", "Glmnet model")
+
+# create a list to store the ROC objects for each model
+roc_objects <- list(null_model_roc_obj, C50_model_roc_obj, 
+                    rf_model_roc_obj, glm_model_roc_obj)
+
+# add ROC curves to the plot and create a legend
+for(i in seq_along(model_names)) 
+  {
+  curve <- roc_objects[[i]]
+  lines(1-curve$specificities, 
+        curve$sensitivities, 
+        col = rainbow(length(model_names))[i], 
+        lty = 1, lwd = 2)
+}
+
+legend("bottomright", 
+       legend = model_names, 
+       col = rainbow(length(model_names)), 
+       lty = 1, lwd = 2,
+       x.intersp = 0.7,
+       y.intersp = 0.7
+       )
+```
+
+
+\newpage
+
+# Conclusion
+
+From all the above models, Boosted C5.0 tree is the best model for this dataset with an accuracy of 0.8833 and ROC-AUC of 0.91. After 5-fold cross validation, the accuracy dropped to 0.8763 and ROC-AUC and 0.90. As per the feature importance plot, the features that seem to be highly important in predicting loan_default are last_pymnt_amt, term_X60.months, installment, grade_G, acc_open_past_24mths.
+
+Findings so far: A lender must consider the following variables while deciding whether to Loan or not:- - Grade- When a person is assigned Grade A, the risk of default is lowest and G grade shows the risk of default is highest. This is because interest rate increase from A-G - Term- default rate is high on 60 months term - inq_last_6mths- inquiries in last 6 months There is a increase in default when number of inquiries increases in last 6 months. Too many inquiries in 6 months may indicate that the borrower is not getting loan from anywhere and is desperate to find one, hence, the number of inquiries are high.
+
+\newpage
+
+# Acknowledgement
+
+I would like to express my heartfelt gratitude to Dr.Eric Suess for his continued guidance, excellent teaching, extremely useful assignments and case studies. I would also like to thank my fellow classmates in Statistics department with whom I've had an opportunity to have many constructive conversations through the course this semester.
