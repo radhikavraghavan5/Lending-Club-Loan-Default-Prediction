@@ -10,7 +10,6 @@ Research Question:- Finding the driver variables for Loans not getting repaid by
 | Boosted C5.0 Decision Tree  | 0.8665  |
 | Null model  | 0.8290  |
 | Logistic regression using GLMNET  | 0.8699  |
-| AdaBoost Classifier  | 0.8360  |
 
 ## Technologies
 Programming Language: R
