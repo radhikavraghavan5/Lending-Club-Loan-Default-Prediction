@@ -13,7 +13,7 @@ Research Question:- Finding the driver variables for Loans not getting repaid by
 
 ## Technologies
 Programming Language: R
-- Libraries: tidymodels, parsnip, Boruta, caret, gmodels
+- Libraries: tidymodels, Caret, gmodels, DataExplorer
 - Visualization: ggplotly
 
 ## Data Source
